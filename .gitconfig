@@ -1,0 +1,13 @@
+[user]
+        name = Mons Anderson
+        email = mons@cpan.org
+[merge]
+        tool = xxdiff
+[core]
+        editor = mcedit
+[color]
+        status = auto
+        branch = auto
+        interactive = auto
+        diff = auto
+

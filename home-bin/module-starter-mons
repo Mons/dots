@@ -1,0 +1,538 @@
+#!/usr/bin/env perl
+
+eval 'exec /home/mons/bin/perl -w -S $0 ${1+"$@"}'
+    if 0; # not running under some shell
+
+=head1 NAME
+
+module-starter - creates a skeleton module distribution
+
+=cut
+
+package main;
+use uni::perl;
+
+MS::App->new->run;
+
+package MS::App;
+use uni::perl;
+use Cwd;
+use File::Path;
+use File::Spec;
+use POSIX ();
+
+sub new {
+	my $pkg = shift;
+	my $self = bless {}, $pkg;
+	my ($name,$dir);
+	$name = shift @ARGV and $name =~ /::/ or warn ("Bad module name: `$name'\n"), usage(0);
+	$self->{name} = $name;
+	$self->{dist} = do { ( my $d = $name ) =~ s{::}{-}g;$d };
+	$dir = $self->{dir} = shift(@ARGV) // $self->{dist};
+	$self->{corelib} = 'lib/'.do { ( my $d = $name ) =~ s{::}{/}g;$d.'.pm' };
+	warn "Create $name under $dir\n";
+	# TODO: Getopt??
+	$self->{author}  ||= 'Mons Anderson';
+	$self->{email}   ||= 'mons@cpan.org';
+	$self->{license} ||= 'perl';
+	$self->{year}    ||= (localtime)[5]+1900;
+	$self->{date}    ||= POSIX::strftime('%Y-%m-%d',localtime());
+	$self;
+}
+
+sub render {
+	my $self = shift;
+	my $tt = shift;
+	my $file = shift;
+	$tt =~ s{<:\s*(.+?)\s*:>}{do{
+		my $var = $1;
+		my $sig = substr($var,0,1,'');
+		$sig =~ m{[\$\%\@]} or die "bad var `$var'\n";
+		my @var = split /\./,$var;
+		if (@var > 1) {
+			die "...";
+		} else {
+			exists $self->{$var} ? $self->{$var} : do {
+				warn "No such key $var";
+				'';
+			};
+		}
+	}}ge;
+	# TODO: mkdir?
+	$self->write_file($file,$tt);
+}
+
+sub run {
+	my $self = shift;
+	if (-e $self->{dir}) {
+		opendir (my $d, $self->{dir});
+		my @files = grep !/^\.\.?$/, readdir $d;
+		closedir $d;
+		#die "Destination `$self->{dir}' already exists and have ".(0+@files)." files\n" if @files;
+	} else {
+		$self->create_dir($self->{dir});
+	}
+	chdir $self->{dir} or die "$!";
+	my $fortune = '1';
+	while () {
+		my $f = `fortune -s`;
+		chomp $f;
+		if ($f and !$f !~ /\n/ or !$f) {
+			last;
+			$f =~ s{'}{`}sg; #'
+			$fortune = "'$f'";
+		}
+	}
+	$self->{fortune} = $fortune;
+	$self->create_makefile;
+	$self->create_corelib;
+	$self->create_changes;
+	$self->create_license;
+	$self->create_manifest_skip;
+	$self->create_makeall;
+	$self->create_ignore;
+	$self->create_readme;
+	$self->create_tests;
+	$self->create_xtests;
+	
+	$self->create_example;
+	$self->create_dir("dist");
+
+
+=for rem
+    my @files;
+    push @files, $self->create_modules( @modules );
+
+    push @files, $self->create_t( @modules );
+    push @files, $self->create_ignores;
+    my %build_results = $self->create_build();
+    push(@files, @{ $build_results{files} } );
+
+    push @files, $self->create_Changes;
+    push @files, $self->create_README( $build_results{instructions} );
+    push @files, 'MANIFEST';
+    $self->create_MANIFEST( grep { $_ ne 't/boilerplate.t' } @files );
+=cut
+}
+
+sub usage {
+	print STDERR <<EOF
+Usage:
+	$0 Module::Name [ Module-Dir ]
+EOF
+	;exit $_[0] ? 0 : 255;
+
+}
+
+sub debug {
+	my $self = shift;
+	my ($action,$message) = @_;
+	unless($self->{quiet}) {
+		printf STDERR "  [%s] %s\n", $action, $message;
+	}
+}
+
+sub create_dir {
+	my ($self, $path) = @_;
+	if (-d $path) {
+		$self->debug(exists => $path);
+		return $self;
+	}
+	File::Path::mkpath($path) or die "Can't make directory `$path': $!\n";
+	$self->debug(mkdir => $path);
+	return $self;
+}
+
+sub write_file {
+  my ($self, $path, $data) = @_;
+  # Directory
+  my @parts = File::Spec->splitdir($path);
+  pop @parts;
+  my $dir = File::Spec->catdir(@parts);
+  $self->create_dir($dir) if $dir;
+  open my $f,'>',$path or die "Can't open file `$path': $!\n";
+  print { $f } $data;
+  close $f;
+  $self->debug(write => $path);
+  return $self;
+}
+
+
+
+sub create_makefile {
+	my $self = shift;
+	$self->render(q{use inc::Module::Install;
+
+my $MI  = $Module::Install::MAIN;
+name           '<: $dist :>';
+all_from       '<: $corelib :>';
+author         '<: $author :> <<: $email :>>';
+license        '<: $license :>';
+
+build_requires 'Test::More';
+build_requires 'lib::abs',  '0.90';
+
+requires 'common::sense',    2;
+# requires 'uni::perl';
+
+auto_provides;
+auto_install;
+
+WriteAll;
+
+print STDERR "Generated makefile for ".$MI->load('name')->name."-".$MI->load('version')->version."\n";
+},'Makefile.PL');
+}
+
+sub create_corelib {
+	my $self = shift;
+	$self->render(q{package <: $name :><: $v512 :>;
+
+use 5.008008;
+use common::sense 2;m{
+use strict;
+use warnings;
+};
+use Carp;
+
+=head1 NAME
+
+<: $name :> - ...
+
+=cut
+
+our $VERSION = '0.01'; $VERSION = eval($VERSION);
+
+=head1 SYNOPSIS
+
+    package Sample;
+    use <: $name :>;
+
+    ...
+
+=head1 DESCRIPTION
+
+    ...
+
+=cut
+
+
+=head1 METHODS
+
+=over 4
+
+=item ...()
+
+...
+
+=back
+
+=cut
+
+sub new { ... }
+
+=head1 AUTHOR
+
+<: $author :>, C<< <<: $email :>> >>
+
+=head1 COPYRIGHT & LICENSE
+
+Copyright <: $year :> <: $author :>, all rights reserved.
+
+This program is free software; you can redistribute it and/or modify it
+under the terms of either: the GNU General Public License as published
+by the Free Software Foundation; or the Artistic License.
+
+=cut
+
+<:$fortune:>;
+},$self->{corelib});
+	
+}
+
+sub create_changes {
+	my $self = shift;
+	$self->render(q{Revision history for <: $name :>
+
+0.01    <: $date :>
+        Initial creation
+},'Changes');
+}
+
+sub create_license {
+	my $self = shift;
+	$self->render(q{COPYRIGHT & LICENSE
+
+This program is free software; you can redistribute it and/or modify it
+under the terms of either: the GNU General Public License as published
+by the Free Software Foundation; or the Artistic License.
+
+Copyright <: $year :> <: $author :>, all rights reserved.
+},'LICENSE');
+}
+
+sub create_manifest_skip {
+	my $self = shift;
+	$self->render(q{# Avoid version control files.
+\B\.git\b
+
+# Avoid Makemaker generated and utility files.
+\bMANIFEST\.bak
+\bMakefile$
+\bblib/
+\bMakeMaker-\d
+\bpm_to_blib\.ts$
+\bpm_to_blib$
+\bblibdirs\.ts$         # 6.18 through 6.25 generated this
+
+# Avoid Module::Build generated and utility files.
+\bBuild$
+\b_build/
+
+# Avoid temp and backup files.
+~$
+\.old$
+\#$
+\b\.#
+\.bak$
+
+# Avoid Devel::Cover files.
+\bcover_db\b
+
+# Avoid local testing/dist files
+
+^dist/
+^makeall\.sh$
+^tmp/
+^<: $dist :>-.*
+},'MANIFEST.SKIP');
+}
+
+sub create_makeall {
+	my $self = shift;
+	$self->render(q{#!/usr/bin/env bash
+
+MODULE=`perl -ne 'print $1 if m{all_from.+?([\w/.]+)}' Makefile.PL`;
+perl=perl
+$perl -v
+
+rm -rf MANIFEST.bak Makefile.old && \
+pod2text $MODULE > README && \
+$perl -i -lpne 's{^\s+$}{};s{^    ((?: {8})+)}{" "x(4+length($1)/2)}se;' README && \
+$perl Makefile.PL && \
+make manifest && \
+make && \
+TEST_AUTHOR=1 make test && \
+TEST_AUTHOR=1 runprove 'xt/*.t' && \
+make disttest && \
+make dist && \
+cp -f *.tar.gz dist/ && \
+make clean && \
+rm -rf MANIFEST.bak Makefile.old && \
+echo "All is OK"
+},'makeall.sh');
+	chmod 755, 'makeall.sh';
+}
+
+
+sub create_ignore {
+	my $self = shift;
+	$self->render(q{
+blib*
+inc*
+Makefile
+Makefile.old
+MANIFEST.bak
+Build
+_build*
+pm_to_blib*
+*.tar.gz
+.lwpcookies
+<: $dist :>-*
+cover_db
+},'.gitignore');
+}
+
+sub create_readme {
+	my $self = shift;
+	$self->render(q{},'README');
+}
+
+sub create_example {
+	my $self = shift;
+	$self->render(q{#!/usr/bin/env perl
+use <: $name :>;
+
+...
+
+},'ex/sample.pl');
+	
+}
+
+sub create_tests {
+	my $self = shift;
+	$self->render(q{#!/usr/bin/env perl -w
+
+use common::sense;
+use lib::abs '../lib';
+use Test::More tests => 2;
+use Test::NoWarnings;
+
+BEGIN {
+	use_ok( '<: $name :>' );
+}
+
+diag( "Testing <: $name :> $<: $name :>::VERSION, Perl $], $^X" );
+},'t/00-load.t');
+
+	$self->render(q{#!/usr/bin/env perl -w
+
+use common::sense;
+use lib::abs '../lib';
+use Test::More tests => 2;
+use Test::NoWarnings;
+use <: $name :>;
+
+fail 'write your tests';
+},'t/01-test.t');
+
+
+	$self->render(q{#!/usr/bin/env perl -w
+
+use common::sense;
+use Test::More;
+use lib::abs "../lib";
+BEGIN {
+	my $lib = lib::abs::path( ".." );
+	chdir $lib or plan skip_all => "Can't chdir to dist $lib";
+}
+
+eval "use Test::Pod 1.22; 1"
+	or plan skip_all => "Test::Pod 1.22 required for testing POD";
+
+all_pod_files_ok();
+
+exit 0;
+require Test::NoWarnings;
+},'t/pod.t');
+
+	$self->render(q{#!/usr/bin/env perl -w
+
+use common::sense;
+use Test::More;
+eval "use Test::Pod::Coverage 1.08; use Pod::Coverage 0.18; 1"
+	or diag($@),
+	plan skip_all => "Test::Pod::Coverage 1.08 and Pod::Coverage 0.18 required for testing POD coverage";
+
+all_pod_coverage_ok();
+exit 0;
+require Test::Pod::Coverage; # hack for kwalitee
+require Test::NoWarnings;
+__END__
+print "1..1\n";
+print "ok 1 - No coverage yet\n";
+},'t/pod-coverage.t');
+
+
+}
+
+sub create_xtests {
+	my $self = shift;
+	$self->render(q{#!/usr/bin/env perl
+
+use lib::abs '../lib';
+use Test::More;
+use Test::Dist;
+chdir lib::abs::path('..');
+
+Test::Dist::dist_ok(
+	run => 1,
+	'+' => 1,
+	skip => [qw(prereq podcover)],
+	kwalitee => {
+		req => [qw( has_separate_license_file has_example
+		metayml_has_provides metayml_declares_perl_version
+		uses_test_nowarnings has_version_in_each_file
+		)],
+	},
+	prereq => [
+		undef,undef, [qw( Test::Pod Test::Pod::Coverage )],
+	],
+);
+exit 0;
+require Test::NoWarnings;
+},'xt/99-dist.t');
+}
+
+
+__END__
+
+=head1 SYNOPSIS
+
+module-starter [options]
+
+Options:
+
+    --module=module  Module name (required, repeatable)
+    --distro=name    Distribution name (optional)
+    --dir=dirname    Directory name to create new module in (optional)
+
+    --builder=module Build with 'ExtUtils::MakeMaker' or 'Module::Build'
+    --eumm           Same as --builder=ExtUtils::MakeMaker
+    --mb             Same as --builder=Module::Build
+    --mi             Same as --builder=Module::Install
+
+    --author=name    Author's name (required)
+    --email=email    Author's email (required)
+    --license=type   License under which the module will be distributed
+                     (default is the same license as perl)
+
+    --verbose        Print progress messages while working
+    --force          Delete pre-existing files if needed
+
+    --help           Show this message
+
+Available Licenses:
+    perl, bsd, gpl, lgpl, mit
+
+Example:
+
+    module-starter --module=Foo::Bar,Foo::Bat \
+        --author="Andy Lester" --email=andy@petdance.com
+
+=head1 DESCRIPTION
+
+C<module-starter> is a command-line interface to L<Module::Starter>, which it
+uses to perform all the work of creating distributions.  An alternate backend
+for C<module-starter> can be specified with the C<--class> option.  Plugins to
+the standard Module::Starter module can be specified with one or more
+C<--plugin> options.
+
+If no directory name is supplied, the distribution name will be used for the
+directory.  If no distribution name is supplied, the first listed module name
+will be used as the distribution name.
+
+Multiple --builder options may be supplied to produce the files for multiple
+builders.
+
+=head1 CONFIGURATION
+
+module-starter will look for a configuration file before reading its command
+line parameters.  The default location is C<$HOME/.module-starter/config> but
+if the MODULE_STARTER_DIR environment variable is set, module-starter will look
+for C<config> in that directory.
+
+The configuration file is just a list of names and values, separated by colons.
+Values that take lists are just space separated.  A sample configuration file
+might read:
+
+ author: Ricardo SIGNES
+ email:  rjbs@cpan.org
+ plugins: Module::Starter::Simple Module::Starter::Plugin::XYZ
+ xyz_option: red green blue
+
+This format may become more elaborate in the future, but a file of this type
+should remain valid.
+
+=cut
+

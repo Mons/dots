@@ -1,0 +1,33 @@
+#!/usr/bin/env perl
+
+my $cmd;
+if ( -d '.svn' ) {
+	$cmd = "svn diff @ARGV | colordiff";
+}
+elsif( -d 'CVS' ) {
+	$cmd = "cvs diff -u5 @ARGV | colordiff";
+}
+elsif( -d '.git' ) {
+	$cmd = "git diff @ARGV";
+}
+else {
+	require Cwd;
+	my @path = split '/',Cwd::cwd();
+	my @deep;
+	while(@path > 2) {
+		unshift @deep, pop @path;
+		my $path = join'/',@path;
+		chdir($path);
+		my $in = join '/',@deep;
+		warn "check $path";
+		if    (-d '.svn') { die "$path -> $in os not in SVN repo"; }
+		elsif (-d 'CVS' ) { die "$path -> $in os not in CVS repo"; }
+		elsif (-d '.git') {
+			warn "found Git in $path -> $in\n";
+			exec("git diff $in");
+		}
+	}
+	die "Neither CVS nor SVN nor Git reporitory\n";
+}
+print STDERR "\$ $cmd\n";
+exec $cmd;

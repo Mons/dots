@@ -1,0 +1,209 @@
+#!/usr/bin/env perl
+
+use strict;
+use IPC::Run 'run';
+use Data::Dumper;
+sub out;
+sub err;
+
+my %CL = qw(
+	darkred     0;31
+	red         1;31
+	
+	green       0;32
+	lime        1;32
+	
+	brown       0;33
+	yellow      1;33
+
+	navy        0;34
+	blue        1;34
+	
+	magenta     0;35
+	pink        1;35
+	
+	darktail    0;36
+	tail        1;36
+	
+	gray        0;37
+	white       1;37
+	
+	clear       0;0
+);
+map { $_="\033[${_}m" } values %CL;
+my $CL = $CL{clear};
+
+my @CVS = ({
+	'?' => [ gray    => 'Unversioned' ],
+	'M' => [ blue    => 'Modified' ],
+	'C' => [ red     => 'Conflict' ],
+	'U' => [ tail    => 'Upsated' ],
+	'P' => [ tail    => 'Patched' ],
+	'R' => [ red     => 'Deleted' ],
+	'A' => [ magenta => 'Added' ],
+
+	'S' => [ green   => '<TODO: unknown status S>' ],
+});
+
+my @SVN = (
+	{
+		' ' => [ white   => undef ],
+		'A' => [ magenta => 'Added' ],
+		'C' => [ red     => 'Conflict' ],
+		'D' => [ red     => 'Deleted' ],
+		'I' => [ darkred => 'Ignored' ],
+		'M' => [ blue    => 'Modified' ],
+		'R' => [ blue    => 'Replaced' ],
+		'X' => [ red     => 'Unversioned but used' ],
+		'?' => [ gray    => 'N/A' ],
+		'!' => [ red     => 'Missing' ],
+		'~' => [ red     => 'Obstructed' ],
+	},
+	{
+		' ' => [ white   => undef ],
+		'C' => [ red     => 'Prop Conflict' ],
+		'M' => [ blue    => 'Prop Modified' ],
+	},
+	{
+		' ' => [ white   => undef ],
+		'L' => [ red     => 'Locked' ],
+	},
+	{
+		' ' => [ white   => undef ],
+		'+' => [ gray    => 'History' ],
+	},
+	{
+		' ' => [ white   => undef ],
+		'S' => [ brown   => 'Switched' ],
+	},
+	{
+		' ' => [ white   => undef ],
+		'K' => [ red     => 'Locked here' ],
+		'O' => [ red     => 'Locked somewhere' ],
+		'T' => [ red     => 'Locked, lock stolen' ],
+		'B' => [ red     => 'Broken lock' ],
+	},
+	{
+		' ' => [ white   => undef ],
+		'C' => [ red     => 'tree-Conflicted' ],
+		'*' => [ green   => 'Needs update' ],
+	}
+);
+
+#my $CONS = ! 
+-f STDOUT and map { $_='' } values %CL;
+
+my $cmd;
+my $ST;
+my $verbose;
+my $updates;
+my $CVS = 0;
+my $SVN = 0;
+if ( -d '.svn' ) {
+	$cmd = "svn status @ARGV";
+	$ST = \@SVN;
+	$verbose = !! grep { /^-\w*?v\w*$/ } @ARGV;
+	$updates = !! grep { /^-\w*?u\w*$/ } @ARGV;
+    $SVN = 1;
+}
+elsif( -d 'CVS' ) {
+	$cmd = "cvs -f -n -q update -d -P @ARGV";
+	$ST = \@CVS;
+    $CVS = 1;
+}
+elsif( -d '.git' ) {
+	exec("git status");
+}
+else {
+	require Cwd;
+	my @path = split '/',Cwd::cwd();
+	my @deep;
+	while(@path > 2) {
+		unshift @deep, pop @path;
+		my $path = join'/',@path;
+		chdir($path);
+		my $in = join '/',@deep;
+		warn "check $path";
+		if    (-d '.svn') { die "$path -> $in os not in SVN repo"; }
+		elsif (-d 'CVS' ) { die "$path -> $in os not in CVS repo"; }
+		elsif (-d '.git') {
+			warn "found Git in $path -> $in\n";
+			exec("git status $in");
+		}
+	}
+	die "Neither CVS nor SVN not Git reporitory\n";
+}
+print STDERR "\$ $cmd\n";
+run [split /\s+/,$cmd], \(undef),\&out,\&err;
+
+sub csay {
+	my $color = shift;
+	my $msg = shift;
+	exists $CL{ $color } or die "Bad color specification: $color\n";
+	print $CL{ $color } . sprintf($msg,@_) . $CL . "\n";
+}
+
+my $left;
+sub out {
+	my $skip;
+	if ($_[ $#_ ] !~ /\n$/) {
+		$skip = 1;
+	}
+	my @s = map split(/\n/),@_;
+	if (defined $left) {
+		$s[0] = $left . $s[0];
+		undef $left;
+	}
+	if ($skip) {
+		$left = pop @s;
+	}
+	for (@s) {
+		if (/^\s*$/s) { print $_,"\n";next; }
+		if (/^Status/s) { print $_,"\n";next; }
+		if (/^Performing.+external/s) { print $CL{gray},$_,$CL,"\n";next; }
+		if (/^      >   /) { print $CL{gray},$_,$CL,"\n";next; }
+		chomp;
+		my @st = $SVN ? split //,$_,9 : do { my @a = split //,$_,3; splice @a,1,0,(' ')x6; @a };
+		my ($rev,$file);
+		if ($updates) {
+			splice(@st,6,1);
+			my $rest = pop @st;$rest =~ s/(^\s+|\s+$)//sg;
+			($rev,$file) = split /\s+/,$rest,2;
+			defined $file or $file = $rest and $rev = -1;
+		}else{
+			$rev = '-';
+			$file = join'',splice(@st,7,2,' ');
+		}
+		#print Dumper(\@st);#"@st $rev $file ()\n";
+		next if -d $file and $file =~ m{(?:^|/)(?:.svn|CVS)$};
+		if ( -f $file ) {}
+		elsif ( -l $file ) {
+			my $post = '';
+			if ( -d $file ) { $post = '/' }
+			$file .= $post.' <'.readlink($file).$post.'>'
+		}
+		elsif ( -d $file ) { $file .= '/' }
+
+		my @status;
+		for (0..$#$ST) {
+			my $color = $ST->[$_]{$st[$_]}[0];
+			exists $CL{ $color } or warn "Bad color specification: $color for col '$_', status '$st[$_]'\n";
+			print $CL{ $color }, $st[$_];
+			push @status,$CL{$color}.$ST->[$_]{$st[$_]}[1].$CL if $ST->[$_]{$st[$_]}[1];
+		}
+		print "\t",$CL{yellow},$rev;
+		print "\t",$CL{white},$file;
+		print "\t(",join(', ',@status).')',$CL,"\n";
+		
+		next;
+	}
+}
+
+sub err {
+	for (map split(/\n/),@_) {
+		next if /^cvs server: New directory .* ignored/;
+		chomp;
+		csay( red => $_ );
+	}
+}
+
