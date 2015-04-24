@@ -1,2 +1,2 @@
 caption always
-caption string "%{kw}%-w%{wr}%02n %t%? [%h]%? %{-}%+w"
+caption string "%{kw}%-w%{wr}%n %t%{-}%+w"

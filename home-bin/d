@@ -7,7 +7,7 @@ if ( -d '.svn' ) {
 elsif( -d 'CVS' ) {
 	$cmd = "cvs diff -u5 @ARGV | colordiff";
 }
-elsif( -d '.git' ) {
+elsif( -e '.git' ) {
 	$cmd = "git diff @ARGV";
 }
 else {
@@ -22,7 +22,7 @@ else {
 		warn "check $path";
 		if    (-d '.svn') { die "$path -> $in os not in SVN repo"; }
 		elsif (-d 'CVS' ) { die "$path -> $in os not in CVS repo"; }
-		elsif (-d '.git') {
+		elsif (-e '.git') {
 			warn "found Git in $path -> $in\n";
 			exec("git diff $in");
 		}

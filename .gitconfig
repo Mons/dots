@@ -1,13 +1,18 @@
 [user]
-        name = Mons Anderson
-        email = mons@cpan.org
+    name = Mons Anderson
+    email = mons@cpan.org
 [merge]
-        tool = xxdiff
+    tool = xxdiff
 [core]
-        editor = mcedit
+    editor = mcedit
 [color]
-        status = auto
-        branch = auto
-        interactive = auto
-        diff = auto
-
+    status = auto
+    branch = auto
+    interactive = auto
+    diff = auto
+[alias]
+    co = checkout
+    ci = commit
+    st = status
+    br = branch
+    lg = log --pretty=format:\"%h %ad | %s%d [%an]\" --graph --date=short
